@@ -20,6 +20,7 @@ char execPath[EXECSZ];
 char *args[50];
 int pid, wstatus, i, fd;
 
+char *formatcmd(char []);
 void tokenizecmd(char []);
 void runcmd(char *[]);
 void outredir(char *[], char *, bool);
@@ -29,7 +30,7 @@ void ampcmd(char *[]);
 
 int main(void) {
 	char usrinput[INPUTSZ], buf[BUFSZ];
-	char *bufptr, *pwname, *pwdir;
+	char *bufptr, *pwname, *pwdir, *cmd;
 	struct passwd *pw;
 
 	// Get user's home directory and username
@@ -51,15 +52,47 @@ int main(void) {
 			printf("\n");
 			break;
 		}
-
-		tokenizecmd(usrinput);
-
+		cmd = formatcmd(usrinput);
+		tokenizecmd(cmd);
 		if (i == 0) {
 			continue;
 		}
 		args[i] = NULL;
 		runcmd(args);
+		free(cmd);
 	}
+}
+
+char *formatcmd(char cmd[]) {
+	char *new = malloc(sizeof(char) * (strlen(cmd) + 1));
+
+	for (int i = 0, j = 0; i <= strlen(cmd); i++) {
+		if (cmd[i] == '&' || cmd[i] == '<' || cmd[i] == '|') {
+			new[j] = ' ';
+			new[j+1] = cmd[i];
+			new[j+2] = ' ';
+			j += 3;
+		} else if (cmd[i] == '>') {
+			if (cmd[i+1] != '>') {
+				new[j] = ' ';
+				new[j+1] = cmd[i];
+				new[j+2] = ' ';
+				j += 3;
+			} else {
+				new[j] = ' ';
+				new[j+1] = cmd[i];
+				new[j+2] = cmd[i+1];
+				new[j+3] = ' ';
+				j += 4;
+				i += 1;
+			}
+		} else {
+			new[j] = cmd[i];
+			j++;
+		}
+	}
+	new[strlen(cmd) + 1] = '\0';
+	return new;
 }
 
 void tokenizecmd(char cmd[]) {
