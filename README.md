@@ -1,2 +1,2 @@
 # shell
-Linux shell
+UNIX shell
