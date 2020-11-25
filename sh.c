@@ -9,6 +9,7 @@
 #include <uuid/uuid.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 
 enum {
 	INPUTSZ = 512,
@@ -47,6 +48,10 @@ int main(void) {
 		if (fgets(usrinput, INPUTSZ, stdin) == NULL) {
 			printf("\n");
 			break;
+		}
+		// Check for blank user input
+		if (usrinput[0] == '\n') {
+			continue;
 		}
 
 		addSpaces(usrinput, newusrinput);
@@ -171,15 +176,17 @@ void runcmd(char *cmd[]) {
 				dup2(fd, 0);
 			}
 			if (outtrunc) {
-				fd = open(cmd[outtrunc], O_WRONLY|O_TRUNC);
+				fd = open(cmd[outtrunc], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
 				dup2(fd, 1);
 			}
 			if (outappend) {
-				fd = open(cmd[outappend], O_WRONLY|O_APPEND);
+				fd = open(cmd[outappend], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
 				dup2(fd, 1);
 			}
 			sprintf(execPath, "/bin/%s", newcmd[0]);
-			execv(execPath, newcmd);
+			if (execv(execPath, newcmd) == -1) {
+				perror(newcmd[0]);
+			}
 			exit(0);
 		} else if (!amp) {
 			waitpid(pid, &wstatus, 0);
@@ -191,12 +198,12 @@ void runcmd(char *cmd[]) {
 
 void piperedir(char *cmd[], int pipecount) {
 	int pfd[pipecount*2];
-	int pid, cmdindex, cmdno, wstatus;
+	int pid, cmdindex, cmdno, wstatus, fd, i;
 	char *args[ARGSZ];
 	char execPath[EXECSZ];
 
 	// Create pipes
-	for (int i = 0; i <= pipecount; i+=2) {
+	for (i = 0; i <= pipecount; i+=2) {
 		pipe(&pfd[i]);
 	}
 
@@ -208,9 +215,34 @@ void piperedir(char *cmd[], int pipecount) {
 			// First command
 			if (cmdno == 0) {
 				dup2(pfd[1], 1);
+				i = 0;
+				while (args[i] != NULL) {
+					if (strcmp(args[i], "<") == 0) {
+						args[i] = NULL;
+						fd = open(args[i+1], O_RDONLY);
+						dup2(fd, 0);
+						break;
+					}
+					i++;
+				}
 			// Last command
 			} else if (cmdno == (pipecount)) {
 				dup2(pfd[(pipecount*2)-2], 0);
+				i = 0;
+				while (args[i] != NULL) {
+					if (strcmp(args[i], ">") == 0) {
+						args[i] = NULL;
+						fd = open(args[i+1], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+						dup2(fd, 1);
+						break;
+					} else if (strcmp(args[i], ">>") == 0) {
+						args[i] = NULL;
+						fd = open(args[i+1], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
+						dup2(fd, 1);
+						break;
+					}
+					i++;
+				}
 			// Middle commands, if any
 			} else {
 				dup2(pfd[(cmdno-1)*2], 0);
@@ -222,7 +254,9 @@ void piperedir(char *cmd[], int pipecount) {
 				close(pfd[i]);
 			}
 			sprintf(execPath, "/bin/%s", args[0]);
-			execv(execPath, args);
+			if (execv(execPath, args) == -1) {
+				perror(args[0]);
+			}
 			exit(0);
 		}
 		cmdindex++;
