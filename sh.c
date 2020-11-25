@@ -75,10 +75,10 @@ int main(void) {
 }
 
 void addSpaces(char old[], char new[]) {
-	int j;
+	int i, n, j;
 
 	j = 0;
-	for (int i = 0, n = strlen(old); i <= n; i++) {
+	for (i = 0, n = strlen(old); i <= n; i++) {
 		if (old[i] == '&' || old[i] == '|' || old[i] == '<') {
 			new[j] = ' ';
 			new[j+1] = old[i];
@@ -262,10 +262,10 @@ void piperedir(char *cmd[], int pipecount) {
 		cmdindex++;
 	}
 
-	for (int i = 0; i <= pipecount*2; i++) {
+	for (i = 0; i <= pipecount*2; i++) {
 		close(pfd[i]);
 	}
-	for (int i = 0; i <= pipecount; i++) {
+	for (i = 0; i <= pipecount; i++) {
 		wait(&wstatus);
 	}
 }
