@@ -22,16 +22,17 @@ void addSpaces(char [], char[]);
 void tokenizecmd(char [], char*[]);
 void runcmd(char *[]);
 void piperedir(char *[], int);
+void runsemicoloncmd(char *[], int);
 int pipetokenize(char *[], int, char *[]);
 
 int main(void) {
-	char buf[BUFSZ], usrinput[INPUTSZ], newusrinput[INPUTSZ];
+	char buf[BUFSZ], usrinput[INPUTSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ];
 	char *args[ARGSZ];
 	struct passwd *pw;
 	char *pwname, *bufptr;
-	int wstatus, pid, i, pipesymbol;
+	int wstatus, pid, i, pipesymbol, semicolonsymbol;
 
-	// Get user's home directory and username
+	// Get user's username
 	pw = getpwuid(getuid());
 	pwname = pw->pw_name;
 
@@ -53,24 +54,34 @@ int main(void) {
 		if (usrinput[0] == '\n') {
 			continue;
 		}
+		// Check for " symbol
+		if (usrinput[0] == '"') {
+			strcpy(usrinput, prevcmd);
+		}
 
 		addSpaces(usrinput, newusrinput);
 		tokenizecmd(newusrinput, args);
 
-		// Check for pipes
+		// Check for pipes and semicolons
 		i = 0;
 		pipesymbol = 0;
+		semicolonsymbol = 0;
 		while (args[i] != NULL) {
 			if (*args[i] == '|') {
 				pipesymbol++;
+			} else if (*args[i] == ';') {
+				semicolonsymbol++;
 			}
 			i++;
 		}
 		if (pipesymbol) {
 			piperedir(args, pipesymbol);
+		} else if (semicolonsymbol) {
+			runsemicoloncmd(args, semicolonsymbol);
 		} else {
 			runcmd(args);
 		}
+		strcpy(prevcmd, usrinput);
 	}
 }
 
@@ -79,7 +90,7 @@ void addSpaces(char old[], char new[]) {
 
 	j = 0;
 	for (i = 0, n = strlen(old); i <= n; i++) {
-		if (old[i] == '&' || old[i] == '|' || old[i] == '<') {
+		if (old[i] == '&' || old[i] == '|' || old[i] == '<' || old[i] == ';') {
 			new[j] = ' ';
 			new[j+1] = old[i];
 			new[j+2] = ' ';
@@ -122,7 +133,6 @@ void tokenizecmd(char cmd[], char *tokens[]) {
 void runcmd(char *cmd[]) {
 	struct passwd *pw;
 	char *pwdir;
-	char execPath[EXECSZ];
 	int pid, wstatus, i, newcmdindex;
 	int inredir, outtrunc, outappend, amp, fd;
 	char *newcmd[ARGSZ];
@@ -183,8 +193,7 @@ void runcmd(char *cmd[]) {
 				fd = open(cmd[outappend], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
 				dup2(fd, 1);
 			}
-			sprintf(execPath, "/bin/%s", newcmd[0]);
-			if (execv(execPath, newcmd) == -1) {
+			if (execvp(newcmd[0], newcmd) == -1) {
 				perror(newcmd[0]);
 			}
 			exit(0);
@@ -200,7 +209,6 @@ void piperedir(char *cmd[], int pipecount) {
 	int pfd[pipecount*2];
 	int pid, cmdindex, cmdno, wstatus, fd, i;
 	char *args[ARGSZ];
-	char execPath[EXECSZ];
 
 	// Create pipes
 	for (i = 0; i <= pipecount; i+=2) {
@@ -253,8 +261,7 @@ void piperedir(char *cmd[], int pipecount) {
 			for (int i = 0; i <=pipecount*2; i++) {
 				close(pfd[i]);
 			}
-			sprintf(execPath, "/bin/%s", args[0]);
-			if (execv(execPath, args) == -1) {
+			if (execvp(args[0], args) == -1) {
 				perror(args[0]);
 			}
 			exit(0);
@@ -273,11 +280,24 @@ void piperedir(char *cmd[], int pipecount) {
 int pipetokenize(char *cmd[], int cmdindex, char *new[]) {
 	int newindex = 0;
 
-	while (cmd[cmdindex] != NULL && strcmp(cmd[cmdindex], "|") != 0) {
+	while (cmd[cmdindex] != NULL && strcmp(cmd[cmdindex], "|") != 0 && strcmp(cmd[cmdindex], ";") != 0) {
 		new[newindex] = cmd[cmdindex];
 		newindex++;
 		cmdindex++;
 	}
 	new[newindex] = NULL;
 	return cmdindex;
+}
+
+void runsemicoloncmd(char *cmd[], int semicoloncount) {
+	int cmdindex, cmdno, wstatus;
+	char *args[ARGSZ];
+	char execPath[EXECSZ];
+
+	cmdindex = 0;
+	for (cmdno = 0; cmdno <= semicoloncount; cmdno++) {
+		cmdindex = pipetokenize(cmd, cmdindex, args);
+		runcmd(args);
+		cmdindex++;
+	}
 }
