@@ -49,7 +49,6 @@ int main(void) {
 		sprintf(bufptr, "%s: ", bufptr);
 		usrinput = readline(bufptr);
 		if (!usrinput) {
-			free(usrinput);
 			break;
 		}
 		// Check for blank user input
