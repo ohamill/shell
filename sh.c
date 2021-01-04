@@ -28,7 +28,7 @@ void runsemicoloncmd(char *[], int);
 int pipetokenize(char *[], int, char *[]);
 
 int main(void) {
-	char buf[BUFSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ];
+	char buf[BUFSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ], prompt[BUFSZ];
 	char *args[ARGSZ];
 	struct passwd *pw;
 	char *usrinput, *pwname, *bufptr;
@@ -45,9 +45,18 @@ int main(void) {
 		}
 		// Print prompt
 		getcwd(buf, BUFSZ);
-		bufptr = strstr(buf, pwname);
-		sprintf(bufptr, "%s: ", bufptr);
-		usrinput = readline(bufptr);
+		for (i = strlen(buf); i >= 0; i--) {
+			if (buf[i] == '/') {
+				bufptr = &buf[i+1];
+				break;
+			}
+		}
+		if (strcmp(bufptr, pwname) == 0) {
+			sprintf(prompt, "%s/~: ", pwname);
+		} else {
+			sprintf(prompt, "%s/...%s: ", pwname, bufptr);
+		}
+		usrinput = readline(prompt);
 		if (!usrinput) {
 			break;
 		}
