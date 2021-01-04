@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 enum {
 	INPUTSZ = 512,
@@ -18,19 +20,19 @@ enum {
 	ARGSZ = 50
 };
 
-void addSpaces(char [], char[]);
-void tokenizecmd(char [], char*[]);
-void runcmd(char *[]);
+void addSpaces(char *, char[]);
+void tokenizecmd(char [], char*[], int*, int*);
+void runcmd(char *[], int);
 void piperedir(char *[], int);
 void runsemicoloncmd(char *[], int);
 int pipetokenize(char *[], int, char *[]);
 
 int main(void) {
-	char buf[BUFSZ], usrinput[INPUTSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ];
+	char buf[BUFSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ];
 	char *args[ARGSZ];
 	struct passwd *pw;
-	char *pwname, *bufptr;
-	int wstatus, pid, i, pipesymbol, semicolonsymbol;
+	char *usrinput, *pwname, *bufptr;
+	int wstatus, pid, i, pipecount, semicoloncount;
 
 	// Get user's username
 	pw = getpwuid(getuid());
@@ -44,48 +46,30 @@ int main(void) {
 		// Print prompt
 		getcwd(buf, BUFSZ);
 		bufptr = strstr(buf, pwname);
-		printf("%s: ", bufptr);
-		// Read user input
-		if (fgets(usrinput, INPUTSZ, stdin) == NULL) {
-			printf("\n");
+		sprintf(bufptr, "%s: ", bufptr);
+		usrinput = readline(bufptr);
+		if (!usrinput) {
+			free(usrinput);
 			break;
 		}
 		// Check for blank user input
 		if (usrinput[0] == '\n') {
 			continue;
 		}
-		// Check for " symbol
-		if (usrinput[0] == '"') {
-			strcpy(usrinput, prevcmd);
-		}
-
+		add_history(usrinput);
 		addSpaces(usrinput, newusrinput);
-		tokenizecmd(newusrinput, args);
-
-		// Check for pipes and semicolons
-		i = 0;
-		pipesymbol = 0;
-		semicolonsymbol = 0;
-		while (args[i] != NULL) {
-			if (*args[i] == '|') {
-				pipesymbol++;
-			} else if (*args[i] == ';') {
-				semicolonsymbol++;
-			}
-			i++;
-		}
-		if (pipesymbol) {
-			piperedir(args, pipesymbol);
-		} else if (semicolonsymbol) {
-			runsemicoloncmd(args, semicolonsymbol);
+		tokenizecmd(newusrinput, args, &pipecount, &semicoloncount);
+		
+		if (semicoloncount) {
+			runsemicoloncmd(args, semicoloncount);
 		} else {
-			runcmd(args);
+			runcmd(args, pipecount);
 		}
-		strcpy(prevcmd, usrinput);
+		free(usrinput);
 	}
 }
 
-void addSpaces(char old[], char new[]) {
+void addSpaces(char *old, char new[]) {
 	int i, n, j;
 
 	j = 0;
@@ -117,37 +101,47 @@ void addSpaces(char old[], char new[]) {
 	new[j] = '\0';
 }
 
-void tokenizecmd(char cmd[], char *tokens[]) {
+void tokenizecmd(char cmd[], char *tokens[], int *pipes, int *semicolons) {
 	int i;
 	char *token;
+	*pipes = 0;
+	*semicolons = 0;
 
 	tokens[0] = strtok(cmd, " \n");
+	if (strcmp(tokens[0], ";") == 0) {
+		*semicolons += 1;
+	} else if (strcmp(tokens[0], "|") == 0) {
+		*pipes += 1;
+	}
 	i = 1;
 	while ((token = strtok(NULL, " \n")) != NULL) {
 		tokens[i] = token;
+		if (strcmp(tokens[i], ";") == 0) {
+			*semicolons += 1;
+		} else if (strcmp(tokens[i], "|") == 0) {
+			*pipes += 1;
+		}
 		i++;
 	}
 	tokens[i] = NULL;
 }
 
-void runcmd(char *cmd[]) {
+void runcmd(char *args[], int pipecount) {
 	struct passwd *pw;
 	char *pwdir;
-	int pid, wstatus, i, newcmdindex;
+	int pid, wstatus, i, newcmdindex, cmdindex, cmdno;
 	int inredir, outtrunc, outappend, amp, fd;
-	char *newcmd[ARGSZ];
+	char *cmd[ARGSZ], *newcmd[ARGSZ];
+	int pfd[pipecount*2];
 
-	// cd built-in
-	if (strcmp(cmd[0], "cd") == 0) {
-		if (cmd[1] == NULL) {
-			pw = getpwuid(getuid());
-			pwdir = pw->pw_dir;
-			chdir(pwdir);
-		} else {
-			chdir(cmd[1]);
-		}
-	// Run command if not built-in
-	} else {
+	// Initialize pipe (won't do anything if pipecount == 0)
+	for (i = 0; i < pipecount; i++) {
+		pipe(&pfd[i*2]);
+	}
+
+	cmdindex = 0;
+	for (cmdno = 0; cmdno <= pipecount; cmdno++) {
+		cmdindex = pipetokenize(args, cmdindex, cmd);
 		inredir = 0;
 		outtrunc = 0;
 		outappend = 0;
@@ -157,19 +151,19 @@ void runcmd(char *cmd[]) {
 		newcmdindex = 0;
 		while (cmd[i] != NULL) {
 			// Input redirection
-			if (strcmp(cmd[i],"<") == 0) {
-				inredir = i + 1;
+			if (strcmp(cmd[i], "<") == 0) {
+				inredir = i + 1; // Get index of file that will replace stdin
 				i++;
 			// Output truncate
-			} else if (strcmp(cmd[i],">") == 0) {
+			} else if (strcmp(cmd[i], ">") == 0) {
 				outtrunc = i + 1;
 				i++;
 			// Output append
-			} else if (strcmp(cmd[i],">>") == 0) {
+			} else if (strcmp(cmd[i], ">>") == 0) {
 				outappend = i + 1;
 				i++;
 			// Background
-			} else if (strcmp(cmd[i],"&") == 0) {
+			} else if (strcmp(cmd[i], "&") == 0) {
 				amp++;
 			} else {
 				newcmd[newcmdindex] = cmd[i];
@@ -177,103 +171,103 @@ void runcmd(char *cmd[]) {
 			}
 			i++;
 		}
-		newcmd[newcmdindex] = NULL;
+		newcmd[newcmdindex] = NULL; // Null-terminate newcmd array of arguments
 
-		pid = fork();
-		if (pid == 0) {
-			if (inredir) {
-				fd = open(cmd[inredir], O_RDONLY);
-				dup2(fd, 0);
-			}
-			if (outtrunc) {
-				fd = open(cmd[outtrunc], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
-				dup2(fd, 1);
-			}
-			if (outappend) {
-				fd = open(cmd[outappend], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
-				dup2(fd, 1);
-			}
-			if (execvp(newcmd[0], newcmd) == -1) {
-				perror(newcmd[0]);
-			}
-			exit(0);
-		} else if (!amp) {
-			waitpid(pid, &wstatus, 0);
-		} else if (amp) {
-			printf("Process started in the background: %d\n", pid);
-		}
-	}
-}
-
-void piperedir(char *cmd[], int pipecount) {
-	int pfd[pipecount*2];
-	int pid, cmdindex, cmdno, wstatus, fd, i;
-	char *args[ARGSZ];
-
-	// Create pipes
-	for (i = 0; i <= pipecount; i+=2) {
-		pipe(&pfd[i]);
-	}
-
-	// Run commands
-	cmdindex = 0;
-	for (cmdno = 0; cmdno <= pipecount; cmdno++) {
-		cmdindex = pipetokenize(cmd, cmdindex, args);
-		if (fork() == 0) {
-			// First command
-			if (cmdno == 0) {
-				dup2(pfd[1], 1);
-				i = 0;
-				while (args[i] != NULL) {
-					if (strcmp(args[i], "<") == 0) {
-						args[i] = NULL;
-						fd = open(args[i+1], O_RDONLY);
-						dup2(fd, 0);
-						break;
+		// Handle pipe, if necessary
+		if (pipecount) {
+			if (fork() == 0) {
+				// First command
+				if (cmdno == 0) {
+					if (outappend || outtrunc) {
+						pid = fork();
+						if (pid == 0) {
+							if (outappend) {
+								fd = open(cmd[outappend], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
+								dup2(fd, 1);
+							} else if (outtrunc) {
+								fd = open(cmd[outtrunc], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+								dup2(fd, 1);
+							}
+							if (execvp(newcmd[0], newcmd) == -1) {
+								perror(newcmd[0]);
+							}
+							exit(0);
+						} else {
+							waitpid(pid, &wstatus, 0);
+						}
 					}
-					i++;
-				}
-			// Last command
-			} else if (cmdno == (pipecount)) {
-				dup2(pfd[(pipecount*2)-2], 0);
-				i = 0;
-				while (args[i] != NULL) {
-					if (strcmp(args[i], ">") == 0) {
-						args[i] = NULL;
-						fd = open(args[i+1], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+					dup2(pfd[1], 1);
+				// Last command
+				} else if (cmdno == pipecount) {
+					dup2(pfd[(pipecount*2)-2], 0);
+					if (outappend) {
+						fd = open(cmd[outappend], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
 						dup2(fd, 1);
-						break;
-					} else if (strcmp(args[i], ">>") == 0) {
-						args[i] = NULL;
-						fd = open(args[i+1], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
+					} else if (outtrunc) {
+						fd = open(cmd[outtrunc], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
 						dup2(fd, 1);
-						break;
 					}
-					i++;
+				// Middle commands, if any
+				} else {
+					dup2(pfd[(cmdno-1)*2], 0);
+					dup2(pfd[(cmdno*2)+1], 1);
 				}
-			// Middle commands, if any
+
+				// Close pipe fds and run command
+				for (int i = 0; i < pipecount*2; i++) {
+					close(pfd[i]);
+				}
+				if (execvp(newcmd[0], newcmd) == -1) {
+					perror(newcmd[0]);
+				}
+				exit(0);
+			}
+		} else {
+			// cd built-in
+			if (strcmp(newcmd[0], "cd") == 0) {
+				if (newcmd[1] == NULL) {
+					pw = getpwuid(getuid());
+					pwdir = pw->pw_dir;
+					chdir(pwdir);
+				} else {
+					chdir(newcmd[1]);
+				}
 			} else {
-				dup2(pfd[(cmdno-1)*2], 0);
-				dup2(pfd[(cmdno*2)+1], 1);
+				pid = fork();
+				if (pid == 0) {
+					if (inredir) {
+						fd = open(cmd[inredir], O_RDONLY);
+						dup2(fd, 0);
+					}
+					if (outtrunc) {
+						fd = open(cmd[outtrunc], O_CREAT|O_WRONLY|O_TRUNC, S_IRWXU);
+						dup2(fd, 1);
+					}
+					if (outappend) {
+						fd = open(cmd[outappend], O_CREAT|O_WRONLY|O_APPEND, S_IRWXU);
+						dup2(fd, 1);
+					}
+					if (execvp(newcmd[0], newcmd) == -1) {
+						perror(newcmd[0]);
+					}
+					exit(0);
+				} else if (!amp) {
+					waitpid(pid, &wstatus, 0);
+				} else if (amp) {
+					printf("Process started in the background: %d\n", pid);
+				}
 			}
-
-			// Close pipe fds and run command
-			for (int i = 0; i <=pipecount*2; i++) {
-				close(pfd[i]);
-			}
-			if (execvp(args[0], args) == -1) {
-				perror(args[0]);
-			}
-			exit(0);
 		}
 		cmdindex++;
 	}
 
-	for (i = 0; i <= pipecount*2; i++) {
-		close(pfd[i]);
-	}
-	for (i = 0; i <= pipecount; i++) {
-		wait(&wstatus);
+	if (pipecount) {
+		for (i = 0; i < pipecount*2; i++) {
+			close(pfd[i]);
+		}
+		for (i = 0; i <= pipecount; i++) {
+			wait(&wstatus);
+		}
 	}
 }
 
@@ -297,7 +291,7 @@ void runsemicoloncmd(char *cmd[], int semicoloncount) {
 	cmdindex = 0;
 	for (cmdno = 0; cmdno <= semicoloncount; cmdno++) {
 		cmdindex = pipetokenize(cmd, cmdindex, args);
-		runcmd(args);
+		runcmd(args, 0);
 		cmdindex++;
 	}
 }
