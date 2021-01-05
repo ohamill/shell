@@ -12,6 +12,9 @@
 #include <errno.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include "./builtins/builtins.h"
+#include "structs.h"
+#include "./quotations/quotations.h"
 
 enum {
 	INPUTSZ = 512,
@@ -115,7 +118,12 @@ void tokenizecmd(char cmd[], char *tokens[], int *pipes, int *semicolons) {
 	*pipes = 0;
 	*semicolons = 0;
 
-	tokens[0] = strtok(cmd, " \n");
+	token = strtok(cmd, " \n");
+	if (isFirstCharQuote(token)) {
+		tokens[0] = packageQuotedArg(token);
+	} else {
+		tokens[0] = token;
+	}
 	if (strcmp(tokens[0], ";") == 0) {
 		*semicolons += 1;
 	} else if (strcmp(tokens[0], "|") == 0) {
@@ -123,7 +131,11 @@ void tokenizecmd(char cmd[], char *tokens[], int *pipes, int *semicolons) {
 	}
 	i = 1;
 	while ((token = strtok(NULL, " \n")) != NULL) {
-		tokens[i] = token;
+		if (isFirstCharQuote(token)) {
+			tokens[i] = packageQuotedArg(token);
+		} else {
+			tokens[i] = token;
+		}
 		if (strcmp(tokens[i], ";") == 0) {
 			*semicolons += 1;
 		} else if (strcmp(tokens[i], "|") == 0) {
@@ -230,6 +242,7 @@ void runcmd(char *args[], int pipecount) {
 				}
 				exit(0);
 			}
+		// Command does not contain any pipes
 		} else {
 			// cd built-in
 			if (strcmp(newcmd[0], "cd") == 0) {
@@ -239,6 +252,16 @@ void runcmd(char *args[], int pipecount) {
 					chdir(pwdir);
 				} else {
 					chdir(newcmd[1]);
+				}
+			} else if (strcmp(newcmd[0], "echo") == 0) {
+				pid = fork();
+				if (pid == 0) {
+					echo(newcmd);
+					exit(0);
+				} else if (!amp) {
+					waitpid(pid, &wstatus, 0);
+				} else if (amp) {
+					printf("Process started in the background: %d\n", pid);
 				}
 			} else {
 				pid = fork();
