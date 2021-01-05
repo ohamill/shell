@@ -25,14 +25,15 @@ void echo(char *cmd[]) {
         }
         echocmds[echoindex] = NULL;
     } else {
-        i = 1;
+        i = 0;
         while (cmd[i] != NULL) {
             echocmds[i] = cmd[i];
             i++;
         }
+        echocmds[i] = NULL;
     }
 
-    i = 0;
+    i = 1;
     while (echocmds[i] != NULL) {
         for (j = 0, n = strlen(echocmds[i]); j < n; j++) {
             if (echocmds[i][j] == delim) {
@@ -53,6 +54,7 @@ bool echoDashOptions(char *cmd[]) {
         if (strcmp(cmd[i], "-d") == 0) {
             return true;
         }
+        i++;
     }
     return false;
 }
