@@ -13,8 +13,9 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "./builtins/builtins.h"
-#include "structs.h"
 #include "./quotations/quotations.h"
+#include "./variables/variables.h"
+#include "sh.h"
 
 enum {
 	INPUTSZ = 512,
@@ -23,12 +24,7 @@ enum {
 	ARGSZ = 50
 };
 
-void addSpaces(char *, char[]);
-void tokenizecmd(char [], char*[], int*, int*);
-void runcmd(char *[], int);
-void piperedir(char *[], int);
-void runsemicoloncmd(char *[], int);
-int pipetokenize(char *[], int, char *[]);
+variable *root;
 
 int main(void) {
 	char buf[BUFSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ], prompt[BUFSZ];
@@ -36,7 +32,9 @@ int main(void) {
 	struct passwd *pw;
 	char *usrinput, *pwname, *bufptr;
 	int wstatus, pid, i, pipecount, semicoloncount;
-
+	root = malloc(sizeof(variable));
+	root->next = NULL;
+	
 	// Get user's username
 	pw = getpwuid(getuid());
 	pwname = pw->pw_name;
@@ -61,6 +59,7 @@ int main(void) {
 		}
 		usrinput = readline(prompt);
 		if (!usrinput) {
+			freeVariables(root);
 			break;
 		}
 		// Check for blank user input
@@ -85,7 +84,7 @@ void addSpaces(char *old, char new[]) {
 
 	j = 0;
 	for (i = 0, n = strlen(old); i <= n; i++) {
-		if (old[i] == '&' || old[i] == '|' || old[i] == '<' || old[i] == ';') {
+		if (old[i] == '&' || old[i] == '|' || old[i] == '<' || old[i] == ';' || old[i] == '=') {
 			new[j] = ' ';
 			new[j+1] = old[i];
 			new[j+2] = ' ';
@@ -118,11 +117,15 @@ void tokenizecmd(char cmd[], char *tokens[], int *pipes, int *semicolons) {
 	*pipes = 0;
 	*semicolons = 0;
 
-	token = strtok(cmd, " \n");
+	token = strtok(cmd, " \n");\
 	if (isFirstCharQuote(token)) {
 		tokens[0] = packageQuotedArg(token);
 	} else {
-		tokens[0] = token;
+		if (isVariable(token)) {
+			tokens[0] = getVariableValue(token, root);
+		} else {
+			tokens[0] = token;
+		}
 	}
 	if (strcmp(tokens[0], ";") == 0) {
 		*semicolons += 1;
@@ -134,7 +137,11 @@ void tokenizecmd(char cmd[], char *tokens[], int *pipes, int *semicolons) {
 		if (isFirstCharQuote(token)) {
 			tokens[i] = packageQuotedArg(token);
 		} else {
-			tokens[i] = token;
+			if (isVariable(token)) {
+				tokens[i] = getVariableValue(token, root);
+			} else {
+				tokens[i] = token;
+			}
 		}
 		if (strcmp(tokens[i], ";") == 0) {
 			*semicolons += 1;
@@ -263,6 +270,8 @@ void runcmd(char *args[], int pipecount) {
 				} else if (amp) {
 					printf("Process started in the background: %d\n", pid);
 				}
+			} else if (strcmp(newcmd[0], "set") == 0) {
+				set(newcmd, root);
 			} else {
 				pid = fork();
 				if (pid == 0) {
