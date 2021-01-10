@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include "./builtins.h"
 #include <stdlib.h>
+#include <dirent.h>
+
+const char *builtincmds[] = {"echo", "cd", "set", "which"};
+const int builtincount = 4;
 
 void echo(char *cmd[]) {
     char *echocmds[50];
@@ -107,4 +111,59 @@ void set(char *cmd[], variable *root) {
         }
         v->value = value; // Overwrite variable's existing value
     }
+}
+
+void which(char *cmd[]) {
+    char *path, *pathstart, *token;
+    bool fileFound;
+    int i = 1;
+
+    path = getenv("PATH");
+    pathstart = malloc(strlen(path) + 1);
+    strcpy(pathstart, path);
+
+    while (cmd[i] != NULL) {
+        fileFound = false;
+        // Check if command is a built-in command
+        for (int j = 0; j < builtincount; j++) {
+            if (strcmp(cmd[i], builtincmds[j]) == 0) {
+                printf("%s: shell built-in command\n", cmd[i]);
+                return;
+            }
+        }
+
+        token = strtok(pathstart, ":");
+        if (searchDir(token, cmd[i])) {
+            strcpy(pathstart, path);
+            continue;
+        }
+        while ((token = strtok(NULL, ":")) != NULL) {
+            if (searchDir(token, cmd[i])) {
+                fileFound = true;
+                break;
+            }
+        }
+        if (!fileFound) {
+            printf("File not found\n");
+        }
+        i++;
+        strcpy(pathstart, path);
+    }
+    free(pathstart);
+}
+
+int searchDir(char *fileToSearch, char *fileToFind) {
+    DIR *dir;
+    struct dirent *d;
+
+    dir = opendir(fileToSearch);
+    while ((d = readdir(dir)) != NULL) {
+        if (strcmp(d->d_name, fileToFind) == 0) {
+            printf("%s/%s\n", fileToSearch, fileToFind);
+            closedir(dir);
+            return 1;
+        }
+    }
+    closedir(dir);
+    return 0;
 }

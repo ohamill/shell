@@ -272,6 +272,16 @@ void runcmd(char *args[], int pipecount) {
 				}
 			} else if (strcmp(newcmd[0], "set") == 0) {
 				set(newcmd, root);
+			} else if (strcmp(newcmd[0], "which") == 0) {
+				pid = fork();
+				if (pid == 0) {
+					which(newcmd);
+					exit(0);
+				} else if (!amp) {
+					waitpid(pid, &wstatus, 0);
+				} else if (amp) {
+					printf("Process started in the background: %d\n", pid);
+				}
 			} else {
 				pid = fork();
 				if (pid == 0) {
