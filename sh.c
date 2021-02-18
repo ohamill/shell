@@ -3,19 +3,16 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <pwd.h>
 #include <uuid/uuid.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <errno.h>
-#include <readline/readline.h>
 #include <readline/history.h>
 #include "./builtins/builtins.h"
 #include "./quotations/quotations.h"
-#include "./variables/variables.h"
 #include "sh.h"
+#include "util/util.h"
+#include "./util/prompt.h"
 
 enum {
 	INPUTSZ = 512,
@@ -27,45 +24,28 @@ enum {
 variable *root;
 
 int main(void) {
-	char buf[BUFSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ], prompt[BUFSZ];
+	char buf[BUFSZ], newusrinput[INPUTSZ], prevcmd[INPUTSZ];
 	char *args[ARGSZ];
 	struct passwd *pw;
-	char *usrinput, *pwname, *bufptr;
+	char *usrinput, *pwname, *bufptr, *prompt;
 	int wstatus, pid, i, pipecount, semicoloncount;
 	root = malloc(sizeof(variable));
 	root->next = NULL;
 	
-	// Get user's username
-	pw = getpwuid(getuid());
-	pwname = pw->pw_name;
+	pwname = getUsername(pw);
 
 	while (true) {
-		// Check for completed background processes
-		if ((pid = waitpid(-1, &wstatus, WNOHANG)) > 0) {
-			printf("Process completed: %d\n", pid);
-		}
-		// Print prompt
-		getcwd(buf, BUFSZ);
-		for (i = strlen(buf); i >= 0; i--) {
-			if (buf[i] == '/') {
-				bufptr = &buf[i+1];
-				break;
-			}
-		}
-		if (strcmp(bufptr, pwname) == 0) {
-			sprintf(prompt, "%s/~: ", pwname);
-		} else {
-			sprintf(prompt, "%s/...%s: ", pwname, bufptr);
-		}
-		usrinput = readline(prompt);
-		if (!usrinput) {
+		checkForCompletedBackgroundProcesses();
+
+		usrinput = getUserInput(pwname);
+		if (isUserInputNull(usrinput)) {
 			freeVariables(root);
 			break;
 		}
-		// Check for blank user input
-		if (usrinput[0] == '\n') {
+		if (isUserInputBlank(usrinput)) {
 			continue;
 		}
+
 		add_history(usrinput);
 		addSpaces(usrinput, newusrinput);
 		tokenizecmd(newusrinput, args, &pipecount, &semicoloncount);
@@ -334,9 +314,8 @@ int pipetokenize(char *cmd[], int cmdindex, char *new[]) {
 }
 
 void runsemicoloncmd(char *cmd[], int semicoloncount) {
-	int cmdindex, cmdno, wstatus;
+	int cmdindex, cmdno;
 	char *args[ARGSZ];
-	char execPath[EXECSZ];
 
 	cmdindex = 0;
 	for (cmdno = 0; cmdno <= semicoloncount; cmdno++) {

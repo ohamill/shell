@@ -19,7 +19,8 @@ variable *createVariable(char *varName, char *varValue, bool readonly) {
 }
 
 char *getVariableValue(char *varName, variable *root) {
-    char *envVar;
+    char *environmentVariable;
+    char *emptyString = "";
     variable *tmp;
     tmp = malloc(sizeof(variable));
     tmp = root->next;
@@ -31,11 +32,11 @@ char *getVariableValue(char *varName, variable *root) {
         }
         tmp = tmp->next;
     }
-    envVar = getenv(varName);
-    if (envVar != NULL) {
-        return envVar;
+    environmentVariable = getenv(varName);
+    if (environmentVariable != NULL) {
+        return environmentVariable;
     }
-    return ""; // If variable is not a valid local or environment variable, return empty string
+    return emptyString; // If variable is not a valid local or environment variable, return empty string
 }
 
 void getAllVariables(variable *root) {
@@ -104,4 +105,12 @@ bool isEnvironmentVariable(char *varName) {
     } else {
         return true;
     }
+}
+
+bool isVariableReadOnly(variable *v) {
+    return v->readonly;
+}
+
+void overwriteValueOfExistingVariable(variable *v, char *newValue) {
+    v->value = newValue;
 }
